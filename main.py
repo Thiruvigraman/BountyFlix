@@ -1,174 +1,202 @@
-import os
-import json
-import time
-import requests
-from pymongo import MongoClient
-from flask import Flask, request, Response
+// main.ts
+import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 
-app = Flask(__name__)
+// -------------------------
+// Environment Variables
+// -------------------------
+const BOT_TOKEN = Deno.env.get("BOT_TOKEN")!;
+const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-# -------------------------
-# Environment Variables
-# -------------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+const REDIS_URL = Deno.env.get("REDIS_URL")!;
+const REDIS_TOKEN = Deno.env.get("REDIS_TOKEN")!;
 
-REDIS_URL = os.getenv("REDIS_URL")
-REDIS_TOKEN = os.getenv("REDIS_TOKEN")
+const MONGO_ENDPOINT = Deno.env.get("MONGO_ENDPOINT")!;
+const MONGO_API_KEY = Deno.env.get("MONGO_API_KEY")!;
 
-MONGO_URI = os.getenv("MONGO_URI")
-MONGO_DB = os.getenv("MONGO_DB")
+const ADMIN_IDS = Deno.env.get("ADMIN_IDS")!.split(",").map(id => parseInt(id));
 
-ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(",")))
+// -------------------------
+// Redis Helpers (Upstash)
+// -------------------------
+async function redisGet(key: string): Promise<string | null> {
+  const res = await fetch(`${REDIS_URL}/get/${key}`, {
+    headers: { "Authorization": `Bearer ${REDIS_TOKEN}` }
+  });
+  const data = await res.json();
+  return data.result || null;
+}
 
-# -------------------------
-# MongoDB Setup
-# -------------------------
-client = MongoClient(MONGO_URI)
-db = client[MONGO_DB]
-users_col = db["users"]
-admins_col = db["admins"]
+async function redisSet(key: string, value: string, ttl = 60) {
+  await fetch(`${REDIS_URL}/set/${key}`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${REDIS_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ value, ex: ttl })
+  });
+}
 
-# -------------------------
-# Redis Helpers (Upstash)
-# -------------------------
-def redis_get(key):
-    r = requests.get(f"{REDIS_URL}/get/{key}",
-                     headers={"Authorization": f"Bearer {REDIS_TOKEN}"})
-    return r.json().get("result")
+async function redisIncr(key: string) {
+  await fetch(`${REDIS_URL}/incr/${key}`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${REDIS_TOKEN}` }
+  });
+}
 
-def redis_set(key, value, ttl=60):
-    requests.post(f"{REDIS_URL}/set/{key}",
-                  headers={"Authorization": f"Bearer {REDIS_TOKEN}"},
-                  json={"value": value, "ex": ttl})
+// -------------------------
+// MongoDB Data API Helpers
+// -------------------------
+async function mongoFindOne(collection: string, filter: object) {
+  const res = await fetch(`${MONGO_ENDPOINT}/action/findOne`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": MONGO_API_KEY
+    },
+    body: JSON.stringify({
+      dataSource: "Cluster0",
+      database: "bot",
+      collection,
+      filter
+    })
+  });
+  const data = await res.json();
+  return data.document || null;
+}
 
-def redis_incr(key):
-    requests.post(f"{REDIS_URL}/incr/{key}",
-                  headers={"Authorization": f"Bearer {REDIS_TOKEN}"})
+async function mongoUpdateOne(collection: string, filter: object, update: object) {
+  await fetch(`${MONGO_ENDPOINT}/action/updateOne`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": MONGO_API_KEY
+    },
+    body: JSON.stringify({
+      dataSource: "Cluster0",
+      database: "bot",
+      collection,
+      filter,
+      update: { "$set": update },
+      upsert: true
+    })
+  });
+}
 
-# -------------------------
-# Telegram Helpers
-# -------------------------
-def send_message(chat_id, text):
-    requests.post(f"{TG_API}/sendMessage", json={"chat_id": chat_id, "text": text})
+// -------------------------
+// Telegram Helpers
+// -------------------------
+async function sendMessage(chat_id: number, text: string) {
+  await fetch(`${TG_API}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id, text })
+  });
+}
 
-# -------------------------
-# Admin Check
-# -------------------------
-def is_admin(user_id):
-    if user_id in ADMIN_IDS:
-        return True
-    if admins_col.find_one({"user_id": user_id}):
-        return True
-    return False
+// -------------------------
+// Admin Check
+// -------------------------
+async function isAdmin(user_id: number): Promise<boolean> {
+  if (ADMIN_IDS.includes(user_id)) return true;
+  const admin = await mongoFindOne("admins", { user_id });
+  return admin !== null;
+}
 
-# -------------------------
-# Add / Update User
-# -------------------------
-def add_user(user_id, username):
-    users_col.update_one(
-        {"user_id": user_id},
-        {"$set": {"username": username}},
-        upsert=True
-    )
+// -------------------------
+// Add / Update User
+// -------------------------
+async function addUser(user_id: number, username: string) {
+  await mongoUpdateOne("users", { user_id }, { username });
+}
 
-# -------------------------
-# Stats
-# -------------------------
-START_TIME = time.time()
+// -------------------------
+// Stats
+// -------------------------
+const START_TIME = Date.now();
 
-def update_stats(user_id):
-    # Total messages
-    redis_incr("total_msgs")
-    redis_incr("msgs_today")
-    # Active users (last 24h)
-    redis_set(f"active:{user_id}", 1, ttl=86400)
+async function updateStats(user_id: number) {
+  await redisIncr("total_msgs");
+  await redisIncr("msgs_today");
+  await redisSet(`active:${user_id}`, "1", 86400);
+}
 
-def get_stats():
-    total = redis_get("total_msgs") or 0
-    today = redis_get("msgs_today") or 0
-    # Count active users
-    r = requests.get(f"{REDIS_URL}/keys/active:*", headers={"Authorization": f"Bearer {REDIS_TOKEN}"})
-    active_keys = r.json().get("result") or []
-    uptime = int(time.time() - START_TIME)
-    return {
-        "total_messages": int(total),
-        "messages_today": int(today),
-        "active_users_24h": len(active_keys),
-        "uptime_seconds": uptime
+async function getStats() {
+  const total = parseInt((await redisGet("total_msgs")) || "0");
+  const today = parseInt((await redisGet("msgs_today")) || "0");
+
+  // Count active users
+  const r = await fetch(`${REDIS_URL}/keys/active:*`, {
+    headers: { "Authorization": `Bearer ${REDIS_TOKEN}` }
+  });
+  const data = await r.json();
+  const active_users = data.result?.length || 0;
+
+  const uptime = Math.floor((Date.now() - START_TIME) / 1000);
+  return { total, today, active_users, uptime };
+}
+
+// -------------------------
+// HTTP Server (Webhook + Dashboard)
+// -------------------------
+serve(async (req) => {
+  const url = new URL(req.url);
+  const pathname = url.pathname;
+
+  // Dashboard
+  if (pathname === "/dashboard") {
+    const stats = await getStats();
+    return new Response(
+      `<h1>Bot Dashboard</h1>
+      <p>Active Users (24h): ${stats.active_users}</p>
+      <p>Messages Today: ${stats.today}</p>
+      <p>Total Messages: ${stats.total}</p>
+      <p>Uptime (s): ${stats.uptime}</p>`,
+      { headers: { "Content-Type": "text/html" } }
+    );
+  }
+
+  // Webhook
+  if (req.method === "POST") {
+    const update = await req.json();
+    if (!update.message) return new Response("ok");
+
+    const msg = update.message;
+    const chat_id = msg.chat.id;
+    const user_id = msg.from.id;
+    const username = msg.from.username || "";
+    const text = msg.text || "";
+
+    // Add user + update stats
+    await addUser(user_id, username);
+    await updateStats(user_id);
+
+    // ---------------- Admin Commands ----------------
+    if (text.startsWith("/stats") && await isAdmin(user_id)) {
+      const stats = await getStats();
+      await sendMessage(chat_id,
+        `📊 Bot Stats\n` +
+        `👥 Active (24h): ${stats.active_users}\n` +
+        `💬 Messages today: ${stats.today}\n` +
+        `💬 Total messages: ${stats.total}\n` +
+        `⏱ Uptime: ${stats.uptime}s`
+      );
+      return new Response("ok");
     }
 
-# -------------------------
-# Flask Webhook
-# -------------------------
-@app.route("/", methods=["POST"])
-def webhook():
-    update = request.get_json()
+    if (text.startsWith("/addadmin") && await isAdmin(user_id)) {
+      const parts = text.split(" ");
+      if (parts.length === 2) {
+        const new_id = parseInt(parts[1]);
+        await mongoUpdateOne("admins", { user_id: new_id }, { user_id: new_id });
+        await sendMessage(chat_id, `✅ Admin ${new_id} added`);
+      } else {
+        await sendMessage(chat_id, "❌ Usage: /addadmin <user_id>");
+      }
+      return new Response("ok");
+    }
 
-    if "message" not in update:
-        return Response("ok", status=200)
+    // ---------------- Normal Reply ----------------
+    await sendMessage(chat_id, "🚀 Bot online & fast!");
+    return new Response("ok");
+  }
 
-    msg = update["message"]
-    chat_id = msg["chat"]["id"]
-    user = msg["from"]
-    user_id = user["id"]
-    username = user.get("username", "")
-    text = msg.get("text", "")
-
-    # Add user and update stats
-    add_user(user_id, username)
-    update_stats(user_id)
-
-    # ---------------- Admin Commands ----------------
-    if text.startswith("/stats") and is_admin(user_id):
-        stats = get_stats()
-        send_message(chat_id,
-                     f"📊 Bot Stats\n"
-                     f"👥 Active (24h): {stats['active_users_24h']}\n"
-                     f"💬 Messages today: {stats['messages_today']}\n"
-                     f"💬 Total messages: {stats['total_messages']}\n"
-                     f"⏱ Uptime: {stats['uptime_seconds']}s")
-        return Response("ok", status=200)
-
-    if text.startswith("/addadmin") and is_admin(user_id):
-        try:
-            new_id = int(text.split()[1])
-            admins_col.update_one(
-                {"user_id": new_id},
-                {"$set": {"user_id": new_id}},
-                upsert=True
-            )
-            send_message(chat_id, f"✅ Admin {new_id} added")
-        except:
-            send_message(chat_id, "❌ Usage: /addadmin <user_id>")
-        return Response("ok", status=200)
-
-    # ---------------- Normal Response ----------------
-    send_message(chat_id, "🚀 Bot online & fast!")
-    return Response("ok", status=200)
-
-# -------------------------
-# Dashboard
-# -------------------------
-@app.route("/dashboard", methods=["GET"])
-def dashboard():
-    stats = get_stats()
-    html = f"""
-    <html>
-    <head><title>Bot Dashboard</title></head>
-    <body>
-    <h1>📊 Bot Dashboard</h1>
-    <p>👥 Active Users (24h): {stats['active_users_24h']}</p>
-    <p>💬 Messages Today: {stats['messages_today']}</p>
-    <p>💬 Total Messages: {stats['total_messages']}</p>
-    <p>⏱ Uptime: {stats['uptime_seconds']} seconds</p>
-    </body>
-    </html>
-    """
-    return Response(html, mimetype="text/html")
-
-# -------------------------
-# Run Flask
-# -------------------------
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+  return new Response("Not Found", { status: 404 });
+});
