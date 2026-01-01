@@ -1,3 +1,7 @@
 {
-  "entrypoint": "main.py"
+"name": "BountyFlix",
+"entrypoint": "main.ts",
+"tasks": {
+"start": "deno run --allow-net --allow-env main.ts"
+}
 }
