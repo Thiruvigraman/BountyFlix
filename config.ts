@@ -1,3 +1,5 @@
+  //config.ts
+
 export const BOT_TOKEN = Deno.env.get("BOT_TOKEN")!;
 export const ADMIN_IDS = new Set(
   Deno.env.get("ADMIN_IDS")!.split(",").map(Number)
