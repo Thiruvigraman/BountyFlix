@@ -1,3 +1,5 @@
+  //main.ts
+
 import { BOT_TOKEN } from "./config.ts";
 import { handleCallback } from "./callbacks.ts";
 import { sendAdminPanel, setDownloadUrlPrompt } from "./adminPanel.ts";
