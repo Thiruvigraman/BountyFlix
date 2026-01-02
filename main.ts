@@ -1,114 +1,124 @@
-   // main.ts
+  // main.ts
 
+// main.ts
 import { BOT_TOKEN, ADMIN_IDS } from "./config.ts";
 import { handleCallback } from "./callbacks.ts";
-import { sendAdminPanel } from "./adminPanel.ts";
+import { sendAdminPanel, setDownloadUrlPrompt } from "./adminPanel.ts";
 import { sendAnimeAnnouncement } from "./announcements.ts";
 import { handleNewUser, broadcastMessage } from "./users.ts";
-import { saveTitle } from "./titles.ts";
+import { saveSeason } from "./titles.ts";
+import { sendOrUpdateIndex, pinMessage } from "./indexMessage.ts";
 import { sendLog } from "./logging.ts";
 
 const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-/**
- * Admin temporary state
- * adminId -> selected letter
- */
-const pendingTitleLetter: Record<number, string> = {};
+// ========================
+// TEMP STATES
+// ========================
+
+// Admin pending season input: adminId -> title
+const pendingSeasonTitle: Record<number, string> = {};
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST") {
-    return new Response("OK");
-  }
+  if (req.method !== "POST") return new Response("OK");
 
   const update = await req.json();
 
-  /* ======================
-     MESSAGE HANDLER
-  ====================== */
+  // ----------------------
+  // Handle messages
+  // ----------------------
   if (update.message) {
     const chatId = update.message.chat.id;
     const userId = update.message.from.id;
-    const text: string | undefined = update.message.text;
+    const text = update.message.text;
 
-    // Admin-only
-    if (!ADMIN_IDS.has(userId)) {
-      return new Response("OK");
-    }
+    // Only admins allowed
+    if (!ADMIN_IDS.has(userId)) return new Response("OK");
 
-    /* ===== STEP 3: Save title after letter selection ===== */
-    if (text && pendingTitleLetter[userId]) {
-      const letter = pendingTitleLetter[userId];
-      delete pendingTitleLetter[userId];
+    // ===== STEP 4: Save season for title =====
+    if (text && pendingSeasonTitle[userId]) {
+      const title = pendingSeasonTitle[userId];
+      delete pendingSeasonTitle[userId];
 
-      await saveTitle(letter, text);
+      await saveSeason(title, text);
 
       await fetch(`${API}/sendMessage`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           chat_id: chatId,
-          text: `✅ Title saved\n\n<b>${text}</b> under letter <b>${letter}</b>`,
+          text: `✅ Season saved\n\n<b>${text}</b>\nfor <b>${title}</b>`,
           parse_mode: "HTML",
         }),
       });
 
-      await sendLog(`🎬 Title added: ${text} (${letter})`);
+      await sendLog(`🎞️ Season added: ${title} → ${text}`);
       return new Response("OK");
     }
 
-    /* ===== Commands ===== */
-
-    if (text === "/adminpanel") {
+    // Admin commands
+    if (text?.startsWith("/adminpanel")) {
       await sendAdminPanel(chatId);
     }
 
-    else if (text.startsWith("/adduser")) {
+    if (text?.startsWith("/adduser")) {
       const id = Number(text.split(" ")[1]);
-      if (!isNaN(id)) {
-        await handleNewUser(id);
-      }
+      await handleNewUser(id);
     }
 
-    else if (text.startsWith("/broadcast")) {
+    if (text?.startsWith("/broadcast")) {
       const msg = text.replace("/broadcast", "").trim();
-      if (msg) {
-        await broadcastMessage(msg);
-      }
+      await broadcastMessage(msg);
     }
 
-    else if (text.startsWith("/announceanime")) {
-      // /announceanime Title | Season | https://link
+    if (text?.startsWith("/announceanime")) {
       const [title, season, link] = text
         .replace("/announceanime", "")
         .split("|")
-        .map((s) => s.trim());
+        .map((s: string) => s.trim());
 
-      if (title && season && link) {
-        await sendAnimeAnnouncement(title, season, link);
-      }
+      await sendAnimeAnnouncement(title, season, link);
+    }
+
+    if (text?.startsWith("/setdownload")) {
+      const [title, season, link] = text
+        .replace("/setdownload", "")
+        .split("|")
+        .map((s: string) => s.trim());
+
+      await setDownloadUrlPrompt(chatId, title, season, link);
+    }
+
+    // ======================
+    // STEP 7: Refresh / Auto-Pin Index
+    // ======================
+    if (text?.startsWith("/refreshindex")) {
+      const msgId = await sendOrUpdateIndex();
+      await pinMessage(msgId);
+      await sendLog("📌 Index refreshed");
     }
   }
 
-  /* ======================
-     CALLBACK HANDLER
-  ====================== */
+  // ----------------------
+  // Handle inline buttons
+  // ----------------------
   if (update.callback_query) {
-    const data = update.callback_query.data;
-    const adminId = update.callback_query.from.id;
-    const chatId = update.callback_query.message.chat.id;
+    const callback = update.callback_query;
 
-    // STEP 3: Letter selected
-    if (data.startsWith("add_title_letter:")) {
-      const letter = data.split(":")[1];
-      pendingTitleLetter[adminId] = letter;
+    const adminId = callback.from.id;
+    const chatId = callback.message.chat.id;
+
+    // STEP 4: Admin clicked a title to add season
+    if (callback.data.startsWith("add_season:")) {
+      const title = callback.data.split(":")[1];
+      pendingSeasonTitle[adminId] = title;
 
       await fetch(`${API}/sendMessage`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          chat_id: chatId,
-          text: `✏️ Send the title name starting with <b>${letter}</b>`,
+          chat_id,
+          text: `✏️ Send season / arc name for\n<b>${title}</b>`,
           parse_mode: "HTML",
         }),
       });
@@ -116,7 +126,8 @@ Deno.serve(async (req) => {
       return new Response("OK");
     }
 
-    await handleCallback(update.callback_query);
+    // Pass everything else to callback handler
+    await handleCallback(callback);
   }
 
   return new Response("OK");
