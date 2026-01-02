@@ -1,3 +1,5 @@
+  //callbacks.ts
+
 import { BOT_TOKEN, INDEX_CHANNEL_ID } from "./config.ts";
 import { getTitles, getSeasons, getDownloadLink, setDownloadLink } from "./titles.ts";
 import { sendLog } from "./logging.ts";
