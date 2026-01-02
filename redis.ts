@@ -1,0 +1,40 @@
+import { REDIS_URL, REDIS_TOKEN } from "./config.ts";
+import { connect } from "https://deno.land/x/upstash_redis/mod.ts";
+
+export const redis = await connect({
+  url: REDIS_URL,
+  token: REDIS_TOKEN
+});
+
+// Redis helper functions
+export async function addUser(userId: number) {
+  await redis.sadd("users", userId.toString());
+}
+
+export async function getUsers(): Promise<string[]> {
+  return await redis.smembers("users") || [];
+}
+
+export async function saveTitle(letter: string, title: string) {
+  await redis.sadd(`letters:${letter}`, title);
+}
+
+export async function getTitles(letter: string): Promise<string[]> {
+  return await redis.smembers(`letters:${letter}`) || [];
+}
+
+export async function saveSeason(title: string, season: string) {
+  await redis.sadd(`title:${title}`, season);
+}
+
+export async function getSeasons(title: string): Promise<string[]> {
+  return await redis.smembers(`title:${title}`) || [];
+}
+
+export async function setDownloadLink(title: string, season: string, url: string) {
+  await redis.set(`season:${title}:${season}`, url);
+}
+
+export async function getDownloadLink(title: string, season: string): Promise<string | null> {
+  return await redis.get(`season:${title}:${season}`);
+}
