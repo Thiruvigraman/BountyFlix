@@ -1,4 +1,4 @@
-// src/redis.ts
+// redis.ts
 import { Redis } from "https://deno.land/x/upstash_redis@v1.20.0/mod.ts";
 import { REDIS_URL, REDIS_TOKEN } from "./config.ts";
 
