@@ -1,4 +1,5 @@
 // redis.ts
+
 import { Redis } from "https://deno.land/x/upstash_redis@v1.20.0/mod.ts";
 import { REDIS_URL, REDIS_TOKEN } from "./config.ts";
 
@@ -58,4 +59,15 @@ export async function setDownloadLink(title: string, season: string, url: string
 // Get download link for a title+season
 export async function getDownloadLink(title: string, season: string): Promise<string | null> {
   return await redis.get(`season:${title}:${season}`);
+}
+
+// ===== INDEX MESSAGE STORAGE =====
+
+export async function saveIndexMessageId(messageId: number) {
+  await redis.set("index:message_id", messageId.toString());
+}
+
+export async function getIndexMessageId(): Promise<number | null> {
+  const id = await redis.get("index:message_id");
+  return id ? Number(id) : null;
 }
