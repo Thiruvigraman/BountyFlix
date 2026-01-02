@@ -1,3 +1,5 @@
+  // index.ts
+
 import { BOT_TOKEN, INDEX_CHANNEL_ID } from "./config.ts";
 import { saveIndexMessageId, getIndexMessageId } from "./redis.ts";
 
