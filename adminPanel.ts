@@ -1,0 +1,29 @@
+import { BOT_TOKEN, ADMIN_IDS } from "./config.ts";
+import { sendLog } from "./logging.ts";
+
+export async function sendAdminPanel(chatId: number) {
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: "Manage Titles", callback_data: "admin_titles" },
+        { text: "Manage Seasons", callback_data: "admin_seasons" }
+      ],
+      [
+        { text: "Manage Users", callback_data: "admin_users" },
+        { text: "Broadcast", callback_data: "admin_broadcast" }
+      ]
+    ]
+  };
+
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: "🛠️ BountyFlix Admin Panel",
+      reply_markup: keyboard
+    })
+  });
+
+  await sendLog(`🛠️ Admin panel sent to ${chatId}`);
+}
