@@ -1,33 +1,34 @@
-  //titles.ts
+  // titles.ts
 
-import { redis } from "./redis.ts";
+import {
+  saveTitle as rSaveTitle,
+  saveSeason as rSaveSeason,
+  getTitles as rGetTitles,
+  getSeasons as rGetSeasons,
+  setDownloadLink as rSetLink,
+  getDownloadLink as rGetLink,
+} from "./redis.ts";
 
-// Save title by letter
-export async function saveTitle(letter: string, title: string) {
-  await redis.sadd(`letters:${letter}`, title);
+export async function addTitle(letter: string, title: string) {
+  await rSaveTitle(letter.toUpperCase(), title);
 }
 
-// Get titles by letter
-export async function getTitles(letter: string): Promise<string[]> {
-  return await redis.smembers(`letters:${letter}`) || [];
+export async function addSeason(title: string, season: string) {
+  await rSaveSeason(title, season);
 }
 
-// Save season
-export async function saveSeason(title: string, season: string) {
-  await redis.sadd(`title:${title}`, season);
+export async function getTitles(letter: string) {
+  return await rGetTitles(letter.toUpperCase());
 }
 
-// Get seasons for title
-export async function getSeasons(title: string): Promise<string[]> {
-  return await redis.smembers(`title:${title}`) || [];
+export async function getSeasons(title: string) {
+  return await rGetSeasons(title);
 }
 
-// Set download link for season
 export async function setDownloadLink(title: string, season: string, url: string) {
-  await redis.set(`season:${title}:${season}`, url);
+  await rSetLink(title, season, url);
 }
 
-// Get download link
-export async function getDownloadLink(title: string, season: string): Promise<string | null> {
-  return await redis.get(`season:${title}:${season}`);
+export async function getDownloadLink(title: string, season: string) {
+  return await rGetLink(title, season);
 }
