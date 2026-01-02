@@ -1,12 +1,13 @@
-  // adminTitles.ts
+   // adminTitles.ts
 
 import { BOT_TOKEN } from "./config.ts";
 import { saveTitle } from "./titles.ts";
-import { sendLog } from "./logging.ts";
-import { sendOrUpdateIndex } from "./index.ts";
+import { sendLog, LogType } from "./logging.ts";
+import { sendOrUpdateIndex } from "./indexMessage.ts";
 
 const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
+// Step 3: Show A–Z letter picker for adding titles
 export async function showLetterPicker(chatId: number) {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
   const rows = [];
@@ -25,28 +26,26 @@ export async function showLetterPicker(chatId: number) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
-      text: "🔤 Select starting letter",
+      text: "🔤 Select the starting letter for the new title",
       reply_markup: { inline_keyboard: rows },
     }),
   });
 }
 
+// Prompt admin to send title name
 export async function askTitleName(chatId: number, letter: string) {
   await fetch(`${API}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      chat_id: chatId,
+      chat_id,
       text: `✏️ Send the title name starting with "${letter}"`,
     }),
   });
 }
 
-export async function saveAdminTitle(
-  chatId: number,
-  letter: string,
-  title: string
-) {
+// Save title and refresh index
+export async function saveAdminTitle(chatId: number, letter: string, title: string) {
   await saveTitle(letter, title);
   await sendOrUpdateIndex();
 
@@ -54,11 +53,11 @@ export async function saveAdminTitle(
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      chat_id: chatId,
+      chat_id,
       text: `✅ Saved\n<b>${title}</b> under <b>${letter}</b>`,
       parse_mode: "HTML",
     }),
   });
 
-  await sendLog(`🎬 Title added: ${title} (${letter})`);
+  await sendLog(LogType.ADMIN, `🎬 Title added: ${title} (${letter})`);
 }
