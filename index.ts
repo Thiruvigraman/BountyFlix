@@ -1,80 +1,34 @@
-  // index.ts
+  //  index.ts
 
-import { BOT_TOKEN, INDEX_CHANNEL_ID } from "./config.ts";
-import { saveIndexMessageId, getIndexMessageId } from "./redis.ts";
+import { getAllTitles } from "./adminTitles.ts";
 
-const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+/**
+ * Builds the A–Z index text
+ * This file ONLY formats data.
+ * No chat_id, no Telegram calls, no side-effects.
+ */
 
-function azKeyboard() {
-  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-  const rows = [];
+export async function buildIndexText(): Promise<string> {
+  const allTitles = await getAllTitles();
 
-  for (let i = 0; i < letters.length; i += 6) {
-    rows.push(
-      letters.slice(i, i + 6).map((l) => ({
-        text: l,
-        callback_data: `letter:${l}`,
-      }))
-    );
-  }
+  const letters = Object.keys(allTitles).sort();
+  let text = "🎬 *BountyFlix Index*\n\n";
 
-  return { inline_keyboard: rows };
-}
+  for (const letter of letters) {
+    const titles = allTitles[letter];
 
-export async function sendOrUpdateIndex() {
-  const text =
-`🎬 <b>BountyFlix Index</b>
+    if (!titles || titles.length === 0) continue;
 
-Browse anime & movies by letter.
-━━━━━━━━━━━━━━━`;
-
-  const existingId = await getIndexMessageId();
-
-  // Try editing old message
-  if (existingId) {
-    try {
-      await fetch(`${API}/editMessageText`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id: INDEX_CHANNEL_ID,
-          message_id: existingId,
-          text,
-          parse_mode: "HTML",
-          reply_markup: azKeyboard(),
-        }),
-      });
-      return;
-    } catch {
-      // If edit fails, send new
+    text += `*${letter}*\n`;
+    for (const title of titles) {
+      text += `• ${title}\n`;
     }
+    text += "\n";
   }
 
-  // Send new message
-  const res = await fetch(`${API}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: INDEX_CHANNEL_ID,
-      text,
-      parse_mode: "HTML",
-      reply_markup: azKeyboard(),
-    }),
-  });
+  if (letters.length === 0) {
+    text += "_No titles added yet._";
+  }
 
-  const data = await res.json();
-  const messageId = data.result.message_id;
-
-  await saveIndexMessageId(messageId);
-
-  // Pin it
-  await fetch(`${API}/pinChatMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: INDEX_CHANNEL_ID,
-      message_id: messageId,
-      disable_notification: true,
-    }),
-  });
+  return text;
 }
