@@ -1,13 +1,21 @@
-   // adminTitles.ts
+  // adminTitles
 
 import { BOT_TOKEN } from "./config.ts";
-import { addTitle as saveTitle } from "./titles.ts";
+import { addTitle } from "./titles.ts";
+import { sendOrUpdateIndex } from "./index.ts";
 import { sendLog, LogType } from "./logging.ts";
-import { sendOrUpdateIndex } from "./indexMessage.ts";
 
 const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-// Step 3: Show A–Z letter picker for adding titles
+// ========================
+// TEMP STATE
+// ========================
+// adminId -> selected letter
+const pendingTitleLetter: Record<number, string> = {};
+
+// ========================
+// SHOW LETTER PICKER
+// ========================
 export async function showLetterPicker(chatId: number) {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
   const rows = [];
@@ -26,38 +34,59 @@ export async function showLetterPicker(chatId: number) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
-      text: "🔤 Select the starting letter for the new title",
+      text: "🔤 Select starting letter",
       reply_markup: { inline_keyboard: rows },
     }),
   });
 }
 
-// Prompt admin to send title name
-export async function askTitleName(chatId: number, letter: string) {
+// ========================
+// HANDLE LETTER CLICK
+// ========================
+export async function handleAddTitleLetter(
+  chatId: number,
+  adminId: number,
+  letter: string
+) {
+  pendingTitleLetter[adminId] = letter;
+
   await fetch(`${API}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      chat_id,
-      text: `✏️ Send the title name starting with "${letter}"`,
+      chat_id: chatId,
+      text: `✏️ Send the title name starting with <b>${letter}</b>`,
+      parse_mode: "HTML",
     }),
   });
 }
 
-// Save title and refresh index
-export async function saveAdminTitle(chatId: number, letter: string, title: string) {
-  await saveTitle(letter, title);
+// ========================
+// HANDLE TITLE TEXT
+// ========================
+export async function handleTitleText(
+  chatId: number,
+  adminId: number,
+  text: string
+): Promise<boolean> {
+  const letter = pendingTitleLetter[adminId];
+  if (!letter) return false;
+
+  delete pendingTitleLetter[adminId];
+
+  await addTitle(letter, text);
   await sendOrUpdateIndex();
 
   await fetch(`${API}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      chat_id,
-      text: `✅ Saved\n<b>${title}</b> under <b>${letter}</b>`,
+      chat_id: chatId,
+      text: `✅ Saved\n<b>${text}</b> under <b>${letter}</b>`,
       parse_mode: "HTML",
     }),
   });
 
-  await sendLog(LogType.ADMIN, `🎬 Title added: ${title} (${letter})`);
+  await sendLog(LogType.ADMIN, `🎬 Title added: ${text} (${letter})`);
+  return true;
 }
