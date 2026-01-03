@@ -1,101 +1,167 @@
   // main.ts
 
-import { config } from "./config.ts";
-import { redis } from "./redis.ts";
-import { isAdmin } from "./users.ts";
-import { sendAdminPanel } from "./adminPanel.ts";
+import { BOT_TOKEN, ADMIN_IDS } from "./config.ts";
 import { handleCallback } from "./callbacks.ts";
-import { logAdminAction, logStatus } from "./logging.ts";
+import { sendAdminPanel, setDownloadUrlPrompt } from "./adminPanel.ts";
+import { sendAnimeAnnouncement } from "./announcements.ts";
+import { handleNewUser, broadcastMessage } from "./users.ts";
+import { addSeason } from "./titles.ts"; // ✅ FIXED
+import { sendOrUpdateIndex } from "./index.ts";
+import { sendLog } from "./logging.ts";
+import { getUsers } from "./redis.ts";
 
-// ---------- BASIC TYPES ----------
-type Update = {
-  update_id: number;
-  message?: any;
-  callback_query?: any;
-};
+const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-// ---------- TELEGRAM API ----------
-const API = `https://api.telegram.org/bot${config.BOT_TOKEN}`;
+// ========================
+// TEMP STATE
+// ========================
+const pendingSeasonTitle: Record<number, string> = {};
 
-async function tg(method: string, body: Record<string, any>) {
-  await fetch(`${API}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
+Deno.serve(async (req) => {
+  if (req.method !== "POST") return new Response("OK");
 
-// ---------- COMMAND HANDLER ----------
-async function handleMessage(msg: any) {
-  const chatId = msg.chat.id;
-  const text = msg.text || "";
-  const userId = msg.from.id;
+  const update = await req.json();
 
-  // Only admins can use commands
-  if (!isAdmin(userId)) return;
+  // ========================
+  // MESSAGES
+  // ========================
+  if (update.message) {
+    const chatId = update.message.chat.id;
+    const userId = update.message.from.id;
+    const text = update.message.text ?? "";
 
-  if (text === "/start" || text === "/admin") {
-    await sendAdminPanel(chatId);
-    logAdminAction(userId, "Opened admin panel");
-    return;
-  }
+    // ---------- HEALTH ----------
+    if (text === "/health") {
+      await fetch(`${API}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "✅ Bot is running\n🚀 Environment OK"
+        })
+      });
+      return new Response("OK");
+    }
 
-  if (text === "/health") {
-    await tg("sendMessage", {
-      chat_id: chatId,
-      text: "✅ Bot is alive\n🧠 Redis: OK\n⚙️ Mode: Polling",
-    });
-    return;
-  }
-
-  if (text === "/stats") {
-    const users = await redis.scard("users");
-    const titles = await redis.scard("titles");
-
-    await tg("sendMessage", {
-      chat_id: chatId,
-      text:
-        `📊 *Bot Stats*\n\n` +
-        `👤 Users: ${users}\n` +
-        `🎬 Titles: ${titles}`,
-      parse_mode: "Markdown",
-    });
-    return;
-  }
-}
-
-// ---------- UPDATE LOOP ----------
-let offset = 0;
-
-async function poll() {
-  try {
-    const res = await fetch(
-      `${API}/getUpdates?timeout=30&offset=${offset}`,
-    );
-    const data = await res.json();
-
-    if (!data.ok) return;
-
-    for (const update of data.result as Update[]) {
-      offset = update.update_id + 1;
-
-      if (update.message) {
-        await handleMessage(update.message);
+    // ---------- STATS ----------
+    if (text === "/stats") {
+      let users = 0;
+      try {
+        users = (await getUsers()).length;
+      } catch {
+        users = 0;
       }
 
-      if (update.callback_query) {
-        await handleCallback(update.callback_query);
+      await fetch(`${API}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text:
+            "📊 <b>BountyFlix Stats</b>\n\n" +
+            `👥 Users: ${users}\n` +
+            `⚙️ Status: Online`,
+          parse_mode: "HTML"
+        })
+      });
+      return new Response("OK");
+    }
+
+    // ---------- ADMIN ONLY ----------
+    if (!ADMIN_IDS.has(userId)) return new Response("OK");
+
+    // STEP 4 — Save season text
+    if (pendingSeasonTitle[userId]) {
+      const title = pendingSeasonTitle[userId];
+      delete pendingSeasonTitle[userId];
+
+      await addSeason(title, text); // ✅ FIXED
+      await sendLog(`🎞 Season added: ${title} → ${text}`);
+
+      await fetch(`${API}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `✅ Season <b>${text}</b> added to <b>${title}</b>`,
+          parse_mode: "HTML"
+        })
+      });
+
+      return new Response("OK");
+    }
+
+    // ---------- COMMANDS ----------
+    if (text === "/adminpanel") {
+      await sendAdminPanel(chatId);
+    }
+
+    if (text.startsWith("/adduser")) {
+      const id = Number(text.split(" ")[1]);
+      if (!isNaN(id)) await handleNewUser(id);
+    }
+
+    if (text.startsWith("/broadcast")) {
+      const msg = text.replace("/broadcast", "").trim();
+      if (msg) await broadcastMessage(msg);
+    }
+
+    if (text.startsWith("/announceanime")) {
+      const [title, season, link] = text
+        .replace("/announceanime", "")
+        .split("|")
+        .map((s) => s.trim());
+
+      if (title && season && link) {
+        await sendAnimeAnnouncement(title, season, link);
       }
     }
-  } catch (err) {
-    console.error("Polling error:", err);
+
+    if (text.startsWith("/setdownload")) {
+      const [title, season, link] = text
+        .replace("/setdownload", "")
+        .split("|")
+        .map((s) => s.trim());
+
+      if (title && season && link) {
+        await setDownloadUrlPrompt(chatId, title, season, link);
+      }
+    }
+
+    if (text === "/refreshindex") {
+      await sendOrUpdateIndex();
+      await sendLog("📌 Index refreshed");
+    }
   }
-}
 
-// ---------- START ----------
-logStatus("Bot started (Railway / Polling)");
+  // ========================
+  // CALLBACKS
+  // ========================
+  if (update.callback_query) {
+    const callback = update.callback_query;
+    const adminId = callback.from.id;
 
-while (true) {
-  await poll();
-  await new Promise((r) => setTimeout(r, 1000));
-}
+    if (!ADMIN_IDS.has(adminId)) return new Response("OK");
+
+    if (callback.data.startsWith("add_season:")) {
+      const title = callback.data.split(":")[1];
+      pendingSeasonTitle[adminId] = title;
+
+      await fetch(`${API}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: callback.message.chat.id,
+          text: `✏️ Send season name for <b>${title}</b>`,
+          parse_mode: "HTML"
+        })
+      });
+
+      return new Response("OK");
+    }
+
+    await handleCallback(callback);
+  }
+
+  return new Response("OK");
+});
