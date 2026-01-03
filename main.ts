@@ -1,210 +1,101 @@
-   // main.ts
+  // main.ts
 
-
-// main.ts
-import { BOT_TOKEN, ADMIN_IDS, INDEX_CHANNEL_ID } from "./config.ts";
+import { config } from "./config.ts";
+import { redis } from "./redis.ts";
+import { isAdmin } from "./users.ts";
+import { sendAdminPanel } from "./adminPanel.ts";
 import { handleCallback } from "./callbacks.ts";
-import { sendAdminPanel, setDownloadUrlPrompt } from "./adminPanel.ts";
-import { sendAnimeAnnouncement } from "./announcements.ts";
-import { handleNewUser, broadcastMessage } from "./users.ts";
-import { addSeason as saveSeason } from "./titles.ts";
-import { sendOrUpdateIndex, pinMessage } from "./indexMessage.ts";
-import { sendLog, LogType } from "./logging.ts";
-import { redis, getIndexMessageId } from "./redis.ts";
+import { logAdminAction, logStatus } from "./logging.ts";
 
-const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+// ---------- BASIC TYPES ----------
+type Update = {
+  update_id: number;
+  message?: any;
+  callback_query?: any;
+};
 
-// ========================
-// TEMP STATES
-// ========================
+// ---------- TELEGRAM API ----------
+const API = `https://api.telegram.org/bot${config.BOT_TOKEN}`;
 
-// Admin pending season input: adminId -> title
-const pendingSeasonTitle: Record<number, string> = {};
+async function tg(method: string, body: Record<string, any>) {
+  await fetch(`${API}/${method}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
 
-Deno.serve(async (req) => {
-  if (req.method !== "POST") return new Response("OK");
+// ---------- COMMAND HANDLER ----------
+async function handleMessage(msg: any) {
+  const chatId = msg.chat.id;
+  const text = msg.text || "";
+  const userId = msg.from.id;
 
-  const update = await req.json();
+  // Only admins can use commands
+  if (!isAdmin(userId)) return;
 
-  // ----------------------
-  // Handle messages
-  // ----------------------
-  if (update.message) {
-    const chatId = update.message.chat.id;
-    const userId = update.message.from.id;
-    const text = update.message.text;
+  if (text === "/start" || text === "/admin") {
+    await sendAdminPanel(chatId);
+    logAdminAction(userId, "Opened admin panel");
+    return;
+  }
 
-    // Only admins allowed
-    if (!ADMIN_IDS.has(userId)) return new Response("OK");
+  if (text === "/health") {
+    await tg("sendMessage", {
+      chat_id: chatId,
+      text: "✅ Bot is alive\n🧠 Redis: OK\n⚙️ Mode: Polling",
+    });
+    return;
+  }
 
-    // ===== STEP 4: Save season for title =====
-    if (text && pendingSeasonTitle[userId]) {
-      const title = pendingSeasonTitle[userId];
-      delete pendingSeasonTitle[userId];
+  if (text === "/stats") {
+    const users = await redis.scard("users");
+    const titles = await redis.scard("titles");
 
-      await saveSeason(title, text);
+    await tg("sendMessage", {
+      chat_id: chatId,
+      text:
+        `📊 *Bot Stats*\n\n` +
+        `👤 Users: ${users}\n` +
+        `🎬 Titles: ${titles}`,
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+}
 
-      await fetch(`${API}/sendMessage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: `✅ Season saved\n\n<b>${text}</b>\nfor <b>${title}</b>`,
-          parse_mode: "HTML",
-        }),
-      });
+// ---------- UPDATE LOOP ----------
+let offset = 0;
 
-      await sendLog(LogType.ADMIN, `🎞️ Season added: ${title} → ${text}`);
-      return new Response("OK");
-    }
+async function poll() {
+  try {
+    const res = await fetch(
+      `${API}/getUpdates?timeout=30&offset=${offset}`,
+    );
+    const data = await res.json();
 
-    // ===== Admin Commands =====
-    if (text?.startsWith("/adminpanel")) {
-      await sendAdminPanel(chatId);
-    }
+    if (!data.ok) return;
 
-    if (text?.startsWith("/adduser")) {
-      const id = Number(text.split(" ")[1]);
-      await handleNewUser(id);
-    }
+    for (const update of data.result as Update[]) {
+      offset = update.update_id + 1;
 
-    if (text?.startsWith("/broadcast")) {
-      const msg = text.replace("/broadcast", "").trim();
-      await broadcastMessage(msg);
-    }
-
-    if (text?.startsWith("/announceanime")) {
-      const [title, season, link] = text
-        .replace("/announceanime", "")
-        .split("|")
-        .map((s: string) => s.trim());
-
-      await sendAnimeAnnouncement(title, season, link);
-    }
-
-    if (text?.startsWith("/setdownload")) {
-      const [title, season, link] = text
-        .replace("/setdownload", "")
-        .split("|")
-        .map((s: string) => s.trim());
-
-      await setDownloadUrlPrompt(chatId, title, season, link);
-    }
-
-    // ======================
-    // STEP 7: Refresh / Auto-Pin Index
-    // ======================
-    if (text?.startsWith("/refreshindex")) {
-      const msgId = await sendOrUpdateIndex();
-      await pinMessage(msgId);
-      await sendLog(LogType.ADMIN, "📌 Index refreshed");
-    }
-
-    // ======================
-    // /stats command
-    // ======================
-    if (text?.startsWith("/stats")) {
-      const usersCount = (await redis.scard("users")) || 0;
-
-      // Count titles and seasons
-      let totalTitles = 0;
-      let totalSeasons = 0;
-      const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-      for (const letter of letters) {
-        const titles = await redis.smembers(`letters:${letter}`) || [];
-        totalTitles += titles.length;
-        for (const title of titles) {
-          const seasons = await redis.smembers(`title:${title}`) || [];
-          totalSeasons += seasons.length;
-        }
+      if (update.message) {
+        await handleMessage(update.message);
       }
 
-      const statsMessage = `
-📊 <b>BountyFlixBot Stats</b>
-━━━━━━━━━━━━━━━
-👤 Users: ${usersCount}
-🎬 Titles: ${totalTitles}
-📂 Seasons: ${totalSeasons}
-🔤 Letters with titles: ${letters.filter(l => (redis.scard(`letters:${l}`) > 0)).length}
-`;
-
-      await fetch(`${API}/sendMessage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id,
-          text: statsMessage,
-          parse_mode: "HTML"
-        }),
-      });
-
-      await sendLog(LogType.ADMIN, `📊 Stats requested by admin ${userId}`);
+      if (update.callback_query) {
+        await handleCallback(update.callback_query);
+      }
     }
-
-    // ======================
-    // /health command
-    // ======================
-    if (text?.startsWith("/health")) {
-      let redisStatus = "❌ Redis not connected";
-      try {
-        await redis.ping();
-        redisStatus = "✅ Redis OK";
-      } catch {}
-
-      const lastIndexId = await getIndexMessageId();
-
-      const healthMessage = `
-💻 <b>BountyFlixBot Health</b>
-━━━━━━━━━━━━━━━
-🤖 Bot: Running
-${redisStatus}
-📌 Last Index Message ID: ${lastIndexId ?? "N/A"}
-`;
-
-      await fetch(`${API}/sendMessage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id,
-          text: healthMessage,
-          parse_mode: "HTML"
-        }),
-      });
-
-      await sendLog(LogType.ADMIN, `💻 Health check requested by admin ${userId}`);
-    }
+  } catch (err) {
+    console.error("Polling error:", err);
   }
+}
 
-  // ----------------------
-  // Handle inline buttons
-  // ----------------------
-  if (update.callback_query) {
-    const callback = update.callback_query;
+// ---------- START ----------
+logStatus("Bot started (Railway / Polling)");
 
-    const adminId = callback.from.id;
-    const chatId = callback.message.chat.id;
-
-    // STEP 4: Admin clicked a title to add season
-    if (callback.data.startsWith("add_season:")) {
-      const title = callback.data.split(":")[1];
-      pendingSeasonTitle[adminId] = title;
-
-      await fetch(`${API}/sendMessage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id,
-          text: `✏️ Send season / arc name for\n<b>${title}</b>`,
-          parse_mode: "HTML",
-        }),
-      });
-
-      return new Response("OK");
-    }
-
-    // Pass everything else to callback handler
-    await handleCallback(callback);
-  }
-
-  return new Response("OK");
-});
+while (true) {
+  await poll();
+  await new Promise((r) => setTimeout(r, 1000));
+}
