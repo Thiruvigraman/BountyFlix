@@ -1,19 +1,13 @@
-   // callbacks.ts
+  // callbacks.ts
 
 import { BOT_TOKEN, INDEX_CHANNEL_ID } from "./config.ts";
-import {
-  getTitles,
-  getSeasons,
-  getDownloadLink,
-} from "./titles.ts";
-import { sendLog } from "./logging.ts";
-import { showLetterPicker, askTitleName } from "./adminTitles.ts";
+import { redis } from "./redis.ts";
 import { handleAdminCallback } from "./adminPanel.ts";
 
 const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 /**
- * Handle all callback queries from inline buttons
+ * Handle all inline button callbacks
  */
 export async function handleCallback(callback: any) {
   const data = callback.data;
@@ -26,72 +20,68 @@ export async function handleCallback(callback: any) {
     return;
   }
 
-  if (data === "admin_titles") {
-    await showLetterPicker(chatId);
-    return;
-  }
-
-  if (data.startsWith("add_title_letter:")) {
-    const letter = data.split(":")[1];
-    await askTitleName(chatId, letter);
-    await sendLog(`🛠️ Admin adding title under ${letter}`);
-    return;
-  }
-
-  // ===== INDEX FLOW =====
+  // ===== A–Z LETTER CLICK =====
   if (data.startsWith("letter:")) {
     const letter = data.split(":")[1];
-    const titles = await getTitles(letter);
+    const titles = await redis.smembers(`titles:${letter}`);
 
-    const buttons = titles.map((t) => [
+    const keyboard = titles.map((t) => [
       { text: t, callback_data: `title:${t}` },
     ]);
 
-    buttons.push([{ text: "⬅ Back", callback_data: "main_menu" }]);
+    keyboard.push([{ text: "⬅ Back", callback_data: "main_menu" }]);
 
     await editMessage(
       INDEX_CHANNEL_ID,
       messageId,
-      `Titles starting with <b>${letter}</b>:`,
-      buttons
+      `📂 Titles starting with <b>${letter}</b>`,
+      keyboard,
     );
-  } else if (data.startsWith("title:")) {
-    const title = data.split(":")[1];
-    const seasons = await getSeasons(title);
+    return;
+  }
 
-    const buttons = seasons.map((s) => [
+  // ===== TITLE CLICK =====
+  if (data.startsWith("title:")) {
+    const title = data.split(":")[1];
+    const seasons = await redis.smembers(`seasons:${title}`);
+
+    const keyboard = seasons.map((s) => [
       { text: s, callback_data: `season:${title}:${s}` },
     ]);
 
-    buttons.push([{ text: "⬅ Back", callback_data: "main_menu" }]);
+    keyboard.push([{ text: "⬅ Back", callback_data: "main_menu" }]);
 
     await editMessage(
       INDEX_CHANNEL_ID,
       messageId,
-      `<b>${title}</b> — Select season`,
-      buttons
+      `🎬 <b>${title}</b>\nSelect season`,
+      keyboard,
     );
-  } else if (data.startsWith("season:")) {
+    return;
+  }
+
+  // ===== SEASON CLICK =====
+  if (data.startsWith("season:")) {
     const [, title, season] = data.split(":");
-    const link = await getDownloadLink(title, season);
+    const link = await redis.get(`download:${title}:${season}`);
 
     await editMessage(
       INDEX_CHANNEL_ID,
       messageId,
       `<b>${title}</b>\n${season}`,
-      [[{ text: "⬇ Download", url: link }]]
+      [[{ text: "⬇ Download", url: link ?? "#" }]],
     );
   }
 }
 
 /**
- * Edit a Telegram message with inline keyboard
+ * Edit an existing Telegram message
  */
 async function editMessage(
   chatId: number,
   messageId: number,
   text: string,
-  inlineKeyboard: any[]
+  inlineKeyboard: any[],
 ) {
   await fetch(`${API}/editMessageText`, {
     method: "POST",
@@ -107,12 +97,12 @@ async function editMessage(
 }
 
 /**
- * Send a message helper
+ * Shared sendMessage helper
  */
 export async function sendMessage(
   chatId: number,
   text: string,
-  replyMarkup?: any
+  replyMarkup?: any,
 ) {
   await fetch(`${API}/sendMessage`, {
     method: "POST",
