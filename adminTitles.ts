@@ -1,92 +1,61 @@
-  // adminTitles
+  // adminTitles.ts
 
-import { BOT_TOKEN } from "./config.ts";
-import { addTitle } from "./titles.ts";
-import { sendOrUpdateIndex } from "./index.ts";
-import { sendLog, LogType } from "./logging.ts";
+import { redis } from "./redis.ts";
 
-const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+/**
+ * Redis structure used:
+ *
+ * titles:index                → Set of letters (A–Z)
+ * titles:{LETTER}             → Set of title names
+ * seasons:{TITLE}             → Set of seasons
+ */
 
-// ========================
-// TEMP STATE
-// ========================
-// adminId -> selected letter
-const pendingTitleLetter: Record<number, string> = {};
+// ==============================
+// ADD TITLE
+// ==============================
+export async function addTitle(letter: string, title: string) {
+  const cleanLetter = letter.toUpperCase();
+  const cleanTitle = title.trim();
 
-// ========================
-// SHOW LETTER PICKER
-// ========================
-export async function showLetterPicker(chatId: number) {
-  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-  const rows = [];
+  if (!cleanTitle) return;
 
-  for (let i = 0; i < letters.length; i += 6) {
-    rows.push(
-      letters.slice(i, i + 6).map((l) => ({
-        text: l,
-        callback_data: `add_title_letter:${l}`,
-      }))
-    );
+  // Save letter
+  await redis.sadd("titles:index", cleanLetter);
+
+  // Save title under letter
+  await redis.sadd(`titles:${cleanLetter}`, cleanTitle);
+}
+
+// ==============================
+// ADD SEASON
+// ==============================
+export async function addSeason(title: string, season: string) {
+  const cleanTitle = title.trim();
+  const cleanSeason = season.trim();
+
+  if (!cleanSeason) return;
+
+  await redis.sadd(`seasons:${cleanTitle}`, cleanSeason);
+}
+
+// ==============================
+// GET ALL TITLES (A–Z)
+// ==============================
+export async function getAllTitles(): Promise<Record<string, string[]>> {
+  const letters = await redis.smembers("titles:index");
+  const result: Record<string, string[]> = {};
+
+  for (const letter of letters) {
+    const titles = await redis.smembers(`titles:${letter}`);
+    result[letter] = titles.sort();
   }
 
-  await fetch(`${API}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: "🔤 Select starting letter",
-      reply_markup: { inline_keyboard: rows },
-    }),
-  });
+  return result;
 }
 
-// ========================
-// HANDLE LETTER CLICK
-// ========================
-export async function handleAddTitleLetter(
-  chatId: number,
-  adminId: number,
-  letter: string
-) {
-  pendingTitleLetter[adminId] = letter;
-
-  await fetch(`${API}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: `✏️ Send the title name starting with <b>${letter}</b>`,
-      parse_mode: "HTML",
-    }),
-  });
-}
-
-// ========================
-// HANDLE TITLE TEXT
-// ========================
-export async function handleTitleText(
-  chatId: number,
-  adminId: number,
-  text: string
-): Promise<boolean> {
-  const letter = pendingTitleLetter[adminId];
-  if (!letter) return false;
-
-  delete pendingTitleLetter[adminId];
-
-  await addTitle(letter, text);
-  await sendOrUpdateIndex();
-
-  await fetch(`${API}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: `✅ Saved\n<b>${text}</b> under <b>${letter}</b>`,
-      parse_mode: "HTML",
-    }),
-  });
-
-  await sendLog(LogType.ADMIN, `🎬 Title added: ${text} (${letter})`);
-  return true;
+// ==============================
+// GET SEASONS FOR A TITLE
+// ==============================
+export async function getSeasons(title: string): Promise<string[]> {
+  return await redis.smembers(`seasons:${title}`);
 }
