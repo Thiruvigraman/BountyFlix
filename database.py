@@ -1,15 +1,26 @@
  # database.py
 
 from pymongo import MongoClient
-from config import MONGO_URI, DB_NAME
+import os, sys, time
+from config import DB_NAME
 
-client = MongoClient(MONGO_URI)
+try:
+    client = MongoClient(
+        os.getenv("MONGO_URI"),
+        serverSelectionTimeoutMS=5000
+    )
+    client.admin.command("ping")
+    print("✅ MongoDB connected")
+except Exception as e:
+    print("❌ MongoDB failed:", e)
+    sys.exit(1)
+
 db = client[DB_NAME]
 
-# SHARED with old bot
+# shared collection (old bot)
 users_col = db["users"]
 
-# BountyFlix collections
+# bountyflix collections
 titles_col = db["bountyflix_titles"]
 
 def get_all_user_ids():
@@ -20,6 +31,9 @@ def get_all_user_ids():
         elif "user id" in u:
             ids.append(u["user id"])
     return list(set(ids))
+
+def get_user_count():
+    return users_col.count_documents({})
 
 def add_title(name: str):
     titles_col.insert_one({"name": name})
