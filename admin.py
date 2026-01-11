@@ -14,7 +14,7 @@ from database import (
     users_col,
 )
 
-# ---------------- ADD ANIME ----------------
+# ---------- ADD ANIME ----------
 
 async def addanime_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
@@ -60,28 +60,30 @@ async def addanime_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-
 async def approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if q.from_user.id != OWNER_ID:
         return
-
     approve_content(ObjectId(q.data.split(":")[1]), OWNER_ID)
     await q.edit_message_text("✅ Approved & live 🎉")
-
 
 async def reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.edit_message_text("❌ Cancelled")
 
-
-# ---------------- BROADCAST ----------------
+# ---------- BROADCAST ----------
 
 async def broadcast_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
 
     raw = update.message.text.replace("/broadcast", "").strip()
-    title, body, btn, link = [x.strip() for x in raw.split("|", 3)]
+    try:
+        title, body, btn, link = [x.strip() for x in raw.split("|", 3)]
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Format:\n/broadcast Title | Message | Button | Link"
+        )
+        return
 
     bid = submit_pending_broadcast(title, body, btn, link, OWNER_ID)
 
@@ -97,7 +99,6 @@ async def broadcast_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=kb,
         parse_mode="HTML"
     )
-
 
 async def approve_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -125,9 +126,8 @@ async def approve_broadcast_callback(update: Update, context: ContextTypes.DEFAU
 
     await q.edit_message_text("✅ Broadcast sent")
 
-
 async def reject_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     bid = ObjectId(q.data.split(":")[1])
-    approve_broadcast(bid)  # delete pending
+    approve_broadcast(bid)
     await q.edit_message_text("❌ Broadcast cancelled")
