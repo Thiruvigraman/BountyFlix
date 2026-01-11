@@ -1,4 +1,4 @@
- # main.py
+  # main.py
 
 import os
 import time
@@ -21,14 +21,15 @@ from callbacks import (
     download_menu,
 )
 from admin import (
-    addanime,
     addanime_submit,
     approve_callback,
     reject_callback,
+    broadcast_submit,
+    approve_broadcast_callback,
+    reject_broadcast_callback,
 )
 from database import get_content_by_slug
 from rate_limit import is_allowed
-from config import OWNER_ID
 
 # ---------------- HEALTH SERVER ----------------
 
@@ -65,10 +66,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
-
     await query.answer()
 
-    # ----- ADMIN APPROVAL -----
     if data.startswith("approve:"):
         await approve_callback(update, context)
         return
@@ -77,7 +76,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reject_callback(update, context)
         return
 
-    # ----- USER FLOW -----
+    if data.startswith("approve_broadcast:"):
+        await approve_broadcast_callback(update, context)
+        return
+
+    if data.startswith("reject_broadcast:"):
+        await reject_broadcast_callback(update, context)
+        return
+
     if data.startswith("letter:"):
         letter = data.split(":")[1]
         await query.edit_message_text(
@@ -124,6 +130,7 @@ async def bot_main():
 
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("addanime", addanime_submit))
+    app_bot.add_handler(CommandHandler("broadcast", broadcast_submit))
     app_bot.add_handler(CallbackQueryHandler(callback_handler))
 
     print("🤖 BountyFlix bot started")
