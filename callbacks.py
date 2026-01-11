@@ -1,22 +1,45 @@
  # callbacks.py
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from database import get_titles
+from database import get_letters_available, get_titles_by_letter
 
-def main_menu():
-    keyboard = [
-        [InlineKeyboardButton("🎬 Movies", callback_data="movies")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+# ------------------ ALPHABET MENU ------------------
 
-def movies_menu():
-    titles = get_titles()
+def alphabet_menu():
+    letters = get_letters_available()  # only letters that exist
     keyboard = []
 
-    for t in titles[:10]:
-        keyboard.append(
-            [InlineKeyboardButton(t["name"], callback_data="noop")]
+    row = []
+    for letter in letters:
+        row.append(
+            InlineKeyboardButton(letter, callback_data=f"letter:{letter}")
         )
+        if len(row) == 5:
+            keyboard.append(row)
+            row = []
 
-    keyboard.append([InlineKeyboardButton("⬅ Back", callback_data="back")])
+    if row:
+        keyboard.append(row)
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+# ------------------ TITLES BY LETTER ------------------
+
+def titles_menu(letter: str):
+    titles = get_titles_by_letter(letter)
+    keyboard = []
+
+    for t in titles:
+        keyboard.append([
+            InlineKeyboardButton(
+                t["title"],
+                callback_data=f"anime:{t['slug']}"
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton("⬅ Back", callback_data="back:alphabet")
+    ])
+
     return InlineKeyboardMarkup(keyboard)
