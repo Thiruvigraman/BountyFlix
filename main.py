@@ -1,4 +1,4 @@
-#main.py
+# main.py
 
 import os
 import time
@@ -43,7 +43,7 @@ def run_web():
     app.run(host="0.0.0.0", port=port)
 
 
-# ---------------- BOT HANDLERS ----------------
+# ---------------- HANDLERS ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_allowed(uid, "command"):
@@ -61,7 +61,6 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(uid):
         await update.message.reply_text("❌ Admin only")
         return
-
     await update.message.reply_text(
         "👑 Admin Panel",
         reply_markup=admin_panel()
@@ -91,10 +90,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ---------------- RUN BOT ----------------
-async def run_bot():
-    global BOT_OK, LAST_HEARTBEAT
-
+# ---------------- BOT LOOP ----------------
+async def bot_main():
     app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app_bot.add_handler(CommandHandler("start", start))
@@ -103,22 +100,14 @@ async def run_bot():
     app_bot.add_handler(CommandHandler("addtitle", handle_add_title))
     app_bot.add_handler(CallbackQueryHandler(callback_handler))
 
-    BOT_OK = True
-    await app_bot.initialize()
-    await app_bot.start()
-    await app_bot.bot.initialize()
-
     print("🤖 Telegram bot started")
-
-    while True:
-        LAST_HEARTBEAT = time.time()
-        await asyncio.sleep(10)
+    await app_bot.run_polling()
 
 
-def start_bot_loop():
+def start_bot():
     while True:
         try:
-            asyncio.run(run_bot())
+            asyncio.run(bot_main())
         except Exception as e:
             print("❌ Bot crashed, restarting:", e)
             time.sleep(5)
@@ -127,4 +116,4 @@ def start_bot_loop():
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
     threading.Thread(target=run_web).start()
-    start_bot_loop()
+    start_bot()
