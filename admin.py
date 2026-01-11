@@ -3,6 +3,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 from bson import ObjectId
+
 from config import OWNER_ID
 from database import (
     submit_pending_content,
@@ -21,7 +22,9 @@ async def addanime_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     raw = update.message.text.replace("/addanime", "").strip()
     if "|" not in raw:
-        await update.message.reply_text("❌ Format: /addanime Title | S1=link , S2=link")
+        await update.message.reply_text(
+            "❌ Format:\n/addanime Title | S1=link , S2=link"
+        )
         return
 
     title, seasons_raw = raw.split("|", 1)
@@ -40,6 +43,9 @@ async def addanime_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
 
     doc = submit_pending_content(title, "", seasons, update.effective_user.id)
+    if not doc:
+        await update.message.reply_text("❌ Duplicate title / slug")
+        return
 
     kb = InlineKeyboardMarkup([
         [
@@ -54,15 +60,19 @@ async def addanime_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+
 async def approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if q.from_user.id != OWNER_ID:
         return
+
     approve_content(ObjectId(q.data.split(":")[1]), OWNER_ID)
-    await q.edit_message_text("✅ Approved & live")
+    await q.edit_message_text("✅ Approved & live 🎉")
+
 
 async def reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.edit_message_text("❌ Cancelled")
+
 
 # ---------------- BROADCAST ----------------
 
@@ -88,10 +98,16 @@ async def broadcast_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+
 async def approve_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     bid = ObjectId(q.data.split(":")[1])
     data = get_pending_broadcast(bid)
+
+    if not data:
+        await q.edit_message_text("❌ Broadcast not found")
+        return
+
     approve_broadcast(bid)
 
     for u in users_col.find({}, {"user_id": 1}):
@@ -104,10 +120,14 @@ async def approve_broadcast_callback(update: Update, context: ContextTypes.DEFAU
                 ]),
                 parse_mode="HTML"
             )
-        except:
+        except Exception:
             pass
 
     await q.edit_message_text("✅ Broadcast sent")
 
+
 async def reject_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.edit_message_text("❌ Broadcast cancelled")
+    q = update.callback_query
+    bid = ObjectId(q.data.split(":")[1])
+    approve_broadcast(bid)  # delete pending
+    await q.edit_message_text("❌ Broadcast cancelled")
