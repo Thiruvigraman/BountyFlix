@@ -1,6 +1,9 @@
- #main.py
+ # main.py
 
-import os, time, asyncio, threading
+import os
+import time
+import asyncio
+import threading
 from flask import Flask, jsonify
 
 from telegram import Update
@@ -8,15 +11,30 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes
+    ContextTypes,
 )
 
-from callbacks import alphabet_menu, titles_menu, seasons_menu, download_menu
-from admin import admin_panel, addanime_submit, admin_callbacks
-from database import get_content_by_slug, inc_stat, get_stats
 from config import is_admin
+from database import (
+    get_content_by_slug,
+    inc_stat,
+    get_stats,
+)
+from callbacks import (
+    alphabet_menu,
+    titles_menu,
+    seasons_menu,
+    download_menu,
+)
+from admin import (
+    admin_panel,
+    addanime_submit,
+    admin_callbacks,
+)
 
-# ---------- FLASK ----------
+# ======================================================
+# FLASK (HEALTH CHECK)
+# ======================================================
 
 app = Flask(__name__)
 START_TIME = time.time()
@@ -27,15 +45,37 @@ def home():
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "uptime": int(time.time() - START_TIME)})
+    return jsonify({
+        "status": "ok",
+        "uptime": int(time.time() - START_TIME)
+    })
 
 def run_web():
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
 
-# ---------- COMMANDS ----------
+# ======================================================
+# SAFE REPLY HELPER (CRITICAL FIX)
+# ======================================================
+
+async def safe_reply(update: Update, text: str, **kwargs):
+    """
+    Replies safely whether command came from:
+    - normal message
+    - menu button
+    - UI command
+    """
+    if update.message:
+        await update.message.reply_text(text, **kwargs)
+    elif update.callback_query:
+        await update.callback_query.message.reply_text(text, **kwargs)
+
+# ======================================================
+# COMMAND HANDLERS
+# ======================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    await safe_reply(
+        update,
         "🎬 <b>Available Movies</b>",
         reply_markup=alphabet_menu(),
         parse_mode="HTML"
@@ -43,87 +83,113 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admins only")
+        await safe_reply(update, "❌ Admins only")
         return
 
-    await update.message.reply_text(
-        "/start\n/addanime\n/admin\n/stats\n/help"
+    await safe_reply(
+        update,
+        "🛠 <b>Admin Commands</b>\n\n"
+        "/start – Browse movies\n"
+        "/admin – Admin panel\n"
+        "/addanime – Add movie/anime\n"
+        "/broadcast – Broadcast message\n"
+        "/stats – Bot statistics\n"
+        "/help – This help",
+        parse_mode="HTML"
     )
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admins only")
+        await safe_reply(update, "❌ Admins only")
         return
 
-    s = get_stats()
+    stats = get_stats()
     uptime = int(time.time() - START_TIME)
 
-    await update.message.reply_text(
-        f"📊 Stats\n"
-        f"Alphabet: {s.get('alphabet_clicks', 0)}\n"
-        f"Anime: {s.get('anime_clicks', 0)}\n"
-        f"Season: {s.get('season_clicks', 0)}\n"
-        f"Downloads: {s.get('download_clicks', 0)}\n\n"
-        f"Uptime: {uptime}s"
+    await safe_reply(
+        update,
+        f"📊 <b>BountyFlix Stats</b>\n\n"
+        f"Alphabet clicks: {stats.get('alphabet_clicks', 0)}\n"
+        f"Anime clicks: {stats.get('anime_clicks', 0)}\n"
+        f"Season clicks: {stats.get('season_clicks', 0)}\n"
+        f"Downloads: {stats.get('download_clicks', 0)}\n\n"
+        f"⏱ Uptime: {uptime} seconds",
+        parse_mode="HTML"
     )
 
-# ---------- CALLBACKS ----------
+# ======================================================
+# CALLBACK HANDLER
+# ======================================================
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    data = q.data
-    await q.answer()
+    query = update.callback_query
+    data = query.data
+    await query.answer()
 
+    # ---------- ADMIN CALLBACKS ----------
     if data.startswith("admin:") or data.startswith("delete:"):
         await admin_callbacks(update, context)
         return
 
+    # ---------- USER FLOW ----------
     if data.startswith("letter:"):
         inc_stat("alphabet_clicks")
-        l = data.split(":")[1]
-        await q.edit_message_text(
-            f"🔤 {l}",
-            reply_markup=titles_menu(l)
+        letter = data.split(":")[1]
+        await query.edit_message_text(
+            f"🔤 <b>{letter}</b>",
+            reply_markup=titles_menu(letter),
+            parse_mode="HTML"
         )
 
     elif data.startswith("anime:"):
         inc_stat("anime_clicks")
         slug = data.split(":")[1]
-        c = get_content_by_slug(slug)
-        await q.edit_message_text(
-            c["title"],
-            reply_markup=seasons_menu(slug)
+        content = get_content_by_slug(slug)
+        if not content:
+            return
+        await query.edit_message_text(
+            f"🎬 <b>{content['title']}</b>",
+            reply_markup=seasons_menu(slug),
+            parse_mode="HTML"
         )
 
     elif data.startswith("season:"):
         inc_stat("season_clicks")
-        _, slug, s = data.split(":")
-        await q.edit_message_text(
-            "⬇ Download",
-            reply_markup=download_menu(slug, int(s))
+        _, slug, season = data.split(":")
+        await query.edit_message_text(
+            "⬇ <b>Select download</b>",
+            reply_markup=download_menu(slug, int(season)),
+            parse_mode="HTML"
         )
 
     elif data.startswith("redirect:"):
         inc_stat("download_clicks")
-        _, slug, s = data.split(":")
-        c = get_content_by_slug(slug)
-        for ss in c["seasons"]:
-            if ss["season"] == int(s):
-                await context.bot.send_message(q.from_user.id, ss["redirect"])
+        _, slug, season = data.split(":")
+        content = get_content_by_slug(slug)
+        if not content:
+            return
+        for s in content.get("seasons", []):
+            if s["season"] == int(season):
+                await context.bot.send_message(
+                    chat_id=query.from_user.id,
+                    text=s["redirect"]
+                )
 
-# ---------- RUN ----------
+# ======================================================
+# BOT RUNNER
+# ======================================================
 
 async def bot_main():
-    app_bot = ApplicationBuilder().token(os.getenv("TOKEN")).build()
+    application = ApplicationBuilder().token(os.getenv("TOKEN")).build()
 
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("help", help_cmd))
-    app_bot.add_handler(CommandHandler("stats", stats_cmd))
-    app_bot.add_handler(CommandHandler("admin", admin_panel))
-    app_bot.add_handler(CommandHandler("addanime", addanime_submit))
-    app_bot.add_handler(CallbackQueryHandler(callback_handler))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("stats", stats_cmd))
+    application.add_handler(CommandHandler("admin", admin_panel))
+    application.add_handler(CommandHandler("addanime", addanime_submit))
+    application.add_handler(CallbackQueryHandler(callback_handler))
 
-    await app_bot.run_polling()
+    await application.run_polling()
 
 def start_bot():
     while True:
@@ -133,6 +199,10 @@ def start_bot():
             print("CRASH:", e)
             time.sleep(5)
 
+# ======================================================
+# ENTRY POINT
+# ======================================================
+
 if __name__ == "__main__":
-    threading.Thread(target=run_web).start()
+    threading.Thread(target=run_web, daemon=True).start()
     start_bot()
