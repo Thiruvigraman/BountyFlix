@@ -1,6 +1,9 @@
  # main.py
 
-import os, time, asyncio, threading
+import os
+import time
+import asyncio
+import threading
 from flask import Flask, jsonify
 
 from telegram import Update
@@ -11,14 +14,11 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from config import BOT_TOKEN, is_admin
-from callbacks import main_menu, movies_menu
-from admin import handle_broadcast, handle_add_title, admin_panel
-from database import get_user_count
+from callbacks import alphabet_menu, titles_menu
 from rate_limit import is_allowed
-from charts import bar_chart
 
-# ---------- HEALTH SERVER ----------
+# -------------------- HEALTH SERVER --------------------
+
 app = Flask(__name__)
 START_TIME = time.time()
 LAST_HEARTBEAT = time.time()
@@ -31,76 +31,34 @@ def home():
 def health():
     return jsonify({
         "status": "ok",
-        "uptime": int(time.time() - START_TIME),
-        "heartbeat": int(time.time() - LAST_HEARTBEAT),
+        "uptime_seconds": int(time.time() - START_TIME),
+        "heartbeat_seconds_ago": int(time.time() - LAST_HEARTBEAT)
     }), 200
+
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# ---------- BOT COMMANDS ----------
+# -------------------- BOT COMMANDS --------------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+
     if not is_allowed(uid, "command"):
         return
+
     await update.message.reply_text(
-        "🎬 Welcome to BountyFlix",
-        reply_markup=main_menu()
+        "🎬 <b>Browse Anime & Movies</b>\n\nSelect a letter to begin 👇",
+        reply_markup=alphabet_menu(),
+        parse_mode="HTML"
     )
 
-async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        return
-    await update.message.reply_text(
-        "👑 Admin Panel",
-        reply_markup=admin_panel()
-    )
-
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        return
-
-    text = (
-        "👑 <b>Admin Commands</b>\n\n"
-        "/admin – Admin panel\n"
-        "/broadcast – Send message\n"
-        "/addtitle – Add movie/title\n"
-        "/stats – Bot statistics\n"
-        "/health – Bot health\n"
-        "/help – This message"
-    )
-    await update.message.reply_text(text, parse_mode="HTML")
-
-async def health_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        return
-
-    uptime = int(time.time() - START_TIME)
-    await update.message.reply_text(
-        f"❤️ Bot running\n⏱ Uptime: {uptime}s"
-    )
-
-async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        return
-
-    total = get_user_count()
-    bar = bar_chart(total, total)
-
-    text = (
-        "📊 <b>BountyFlix Stats</b>\n\n"
-        f"👥 Users: {total}\n"
-        f"{bar} 100%\n\n"
-        f"⏱ Uptime: {int(time.time() - START_TIME)}s"
-    )
-    await update.message.reply_text(text, parse_mode="HTML")
+# -------------------- CALLBACK HANDLER --------------------
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global LAST_HEARTBEAT
+
     query = update.callback_query
     uid = query.from_user.id
 
@@ -109,44 +67,53 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await query.answer()
+    LAST_HEARTBEAT = time.time()
 
-    if query.data == "movies":
+    data = query.data
+
+    # -------- LETTER CLICK --------
+    if data.startswith("letter:"):
+        letter = data.split(":")[1]
+
         await query.edit_message_text(
-            "🎬 Available Movies:",
-            reply_markup=movies_menu()
-        )
-    elif query.data == "back":
-        await query.edit_message_text(
-            "🏠 Main Menu",
-            reply_markup=main_menu()
+            f"🔤 <b>Titles starting with {letter}</b>",
+            reply_markup=titles_menu(letter),
+            parse_mode="HTML"
         )
 
-# ---------- BOT RUN ----------
+    # -------- BACK TO ALPHABET --------
+    elif data == "back:alphabet":
+        await query.edit_message_text(
+            "🎬 <b>Browse Anime & Movies</b>\n\nSelect a letter to begin 👇",
+            reply_markup=alphabet_menu(),
+            parse_mode="HTML"
+        )
+
+# -------------------- BOT RUNNER --------------------
+
 async def bot_main():
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+    application = (
+        ApplicationBuilder()
+        .token(os.getenv("TOKEN"))
+        .build()
+    )
 
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("admin", admin))
-    app_bot.add_handler(CommandHandler("help", help_cmd))
-    app_bot.add_handler(CommandHandler("health", health_cmd))
-    app_bot.add_handler(CommandHandler("stats", stats_cmd))
-    app_bot.add_handler(CommandHandler("broadcast", handle_broadcast))
-    app_bot.add_handler(CommandHandler("addtitle", handle_add_title))
-    app_bot.add_handler(CallbackQueryHandler(callback_handler))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(callback_handler))
 
-    print("🤖 Telegram bot started")
-    await app_bot.run_polling()
+    print("🤖 BountyFlix bot started")
+    await application.run_polling()
 
 def start_bot():
-    global LAST_HEARTBEAT
     while True:
         try:
             asyncio.run(bot_main())
         except Exception as e:
-            print("❌ Bot crashed, restarting:", e)
+            print("❌ Bot crashed, restarting in 5s:", e)
             time.sleep(5)
 
-# ---------- ENTRY ----------
+# -------------------- ENTRY POINT --------------------
+
 if __name__ == "__main__":
     threading.Thread(target=run_web).start()
     start_bot()
