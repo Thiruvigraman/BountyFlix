@@ -1,11 +1,11 @@
-  # callbacks.py
+ # callbacks.py
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from database import get_titles
 
 def main_menu():
     keyboard = [
-        [InlineKeyboardButton("🎬 Movies", callback_data="movies")],
+        [InlineKeyboardButton("🎬 Movies", callback_data="movies")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
