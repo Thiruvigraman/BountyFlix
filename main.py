@@ -15,12 +15,7 @@ from telegram.ext import (
 )
 from telegram.error import BadRequest
 
-from callbacks import (
-    alphabet_menu,
-    titles_menu,
-    seasons_menu,
-    download_menu,
-)
+from callbacks import alphabet_menu, titles_menu, seasons_menu, download_menu
 from admin import (
     addanime_submit,
     approve_callback,
@@ -39,8 +34,6 @@ from database import (
 from rate_limit import is_allowed
 from config import OWNER_ID, CHANNEL_ID
 
-# ---------------- HEALTH SERVER ----------------
-
 app = Flask(__name__)
 START_TIME = time.time()
 
@@ -58,7 +51,7 @@ def health():
 def run_web():
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
 
-# ---------------- AUTO PIN ----------------
+# ---------- AUTO PIN ----------
 
 async def pin_alphabet_menu(app_bot):
     old = get_pinned_menu()
@@ -83,7 +76,7 @@ async def pin_alphabet_menu(app_bot):
 
     save_pinned_menu(msg.message_id)
 
-# ---------------- COMMANDS ----------------
+# ---------- COMMANDS ----------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id, "command"):
@@ -94,7 +87,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=alphabet_menu(),
         parse_mode="HTML"
     )
-
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
@@ -109,21 +101,25 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help"
     )
 
-
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
 
     s = get_stats() or {}
+    uptime = int(time.time() - START_TIME)
+
     await update.message.reply_text(
-        f"📊 Stats\n\n"
-        f"Alphabet: {s.get('alphabet_clicks', 0)}\n"
-        f"Anime: {s.get('anime_clicks', 0)}\n"
-        f"Season: {s.get('season_clicks', 0)}\n"
-        f"Download: {s.get('download_clicks', 0)}"
+        f"📊 <b>BountyFlix Stats</b>\n\n"
+        f"🔤 Alphabet clicks: {s.get('alphabet_clicks', 0)}\n"
+        f"🎬 Anime clicks: {s.get('anime_clicks', 0)}\n"
+        f"📺 Season clicks: {s.get('season_clicks', 0)}\n"
+        f"⬇ Download clicks: {s.get('download_clicks', 0)}\n\n"
+        f"⏱ Uptime: {uptime} seconds\n"
+        f"🟢 Status: Running",
+        parse_mode="HTML"
     )
 
-# ---------------- CALLBACK HANDLER ----------------
+# ---------- CALLBACK HANDLER ----------
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -135,6 +131,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await q.answer()
+
+    if data == "noop":
+        await q.answer("Content coming soon 👀")
+        return
 
     # ADMIN
     if data.startswith("approve:"):
@@ -152,8 +152,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎬 <b>Browse Anime & Movies</b>",
             reply_markup=alphabet_menu(),
             parse_mode="HTML"
-        )
-        return
+        ); return
 
     if data.startswith("back:titles:"):
         letter = data.split(":")[2]
@@ -161,8 +160,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔤 <b>{letter}</b>",
             reply_markup=titles_menu(letter),
             parse_mode="HTML"
-        )
-        return
+        ); return
 
     if data.startswith("back:seasons:"):
         slug = data.split(":")[2]
@@ -171,8 +169,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎬 <b>{content['title']}</b>",
             reply_markup=seasons_menu(slug),
             parse_mode="HTML"
-        )
-        return
+        ); return
 
     # FLOW
     if data.startswith("letter:"):
@@ -211,7 +208,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if ss["season"] == int(s):
                 await context.bot.send_message(uid, ss["redirect"])
 
-# ---------------- RUNNER ----------------
+# ---------- RUN ----------
 
 async def bot_main():
     app_bot = ApplicationBuilder().token(os.getenv("TOKEN")).build()
