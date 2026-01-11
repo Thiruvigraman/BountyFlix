@@ -30,6 +30,8 @@ from admin import (
 )
 from database import get_content_by_slug
 from rate_limit import is_allowed
+from database import inc_stat, get_stats
+from config import OWNER_ID
 
 # ---------------- HEALTH SERVER ----------------
 
