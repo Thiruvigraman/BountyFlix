@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.ext import CallbackContext
 from database import get_all_user_ids, add_title
 
-ADMIN_ID = 6778132055
+ADMIN_ID = 123456789  # CHANGE THIS
 
 
 def admin(update: Update, context: CallbackContext):
@@ -18,17 +18,21 @@ def handle_broadcast(update: Update, context: CallbackContext):
         return
 
     message = " ".join(context.args)
-    users = get_all_user_ids()
+    if not message:
+        update.message.reply_text("Usage: /broadcast <message>")
+        return
 
+    users = get_all_user_ids()
     sent = 0
+
     for user_id in users:
         try:
             context.bot.send_message(chat_id=user_id, text=message)
             sent += 1
         except Exception:
-            continue  # FIX: prevent crash
+            continue
 
-    update.message.reply_text(f"Broadcast sent to {sent} users")
+    update.message.reply_text(f"Sent to {sent} users")
 
 
 def handle_add_title(update: Update, context: CallbackContext):
