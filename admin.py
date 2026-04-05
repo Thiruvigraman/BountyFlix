@@ -1,54 +1,44 @@
-  #admin.py
+ #admin.py
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import Forbidden, BadRequest
-from config import is_admin
+from telegram import Update
+from telegram.ext import CallbackContext
 from database import get_all_user_ids, add_title
-from rate_limit import is_allowed
 
-def admin_panel():
-    keyboard = [
-        [InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")],
-        [InlineKeyboardButton("➕ Add Title", callback_data="admin_add_title")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+ADMIN_ID = 6778132055
 
-def handle_broadcast(update, context):
-    uid = update.effective_user.id
 
-    if not is_admin(uid):
+def admin(update: Update, context: CallbackContext):
+    if update.effective_user.id != ADMIN_ID:
         return
+    update.message.reply_text("Admin panel")
 
-    if not is_allowed(uid, "admin"):
-        update.message.reply_text("⏳ Slow down")
-        return
 
-    if not context.args:
-        update.message.reply_text("Usage: /broadcast <message>")
+def handle_broadcast(update: Update, context: CallbackContext):
+    if update.effective_user.id != ADMIN_ID:
         return
 
     message = " ".join(context.args)
+    users = get_all_user_ids()
+
     sent = 0
-
-    for user_id in get_all_user_ids():
+    for user_id in users:
         try:
-            context.bot.send_message(user_id, message)
+            context.bot.send_message(chat_id=user_id, text=message)
             sent += 1
-        except (Forbidden, BadRequest):
-            pass
+        except Exception:
+            continue  # FIX: prevent crash
 
-    update.message.reply_text(f"✅ Broadcast sent to {sent} users")
+    update.message.reply_text(f"Broadcast sent to {sent} users")
 
-def handle_add_title(update, context):
-    uid = update.effective_user.id
 
-    if not is_admin(uid):
+def handle_add_title(update: Update, context: CallbackContext):
+    if update.effective_user.id != ADMIN_ID:
         return
 
-    if not context.args:
+    name = " ".join(context.args)
+    if not name:
         update.message.reply_text("Usage: /addtitle <name>")
         return
 
-    title = " ".join(context.args)
-    add_title(title)
-    update.message.reply_text(f"🎬 Added: {title}")
+    add_title(name)
+    update.message.reply_text("Title added")
