@@ -2,13 +2,11 @@
 
 import os
 
-BOT_TOKEN = os.getenv("TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
-DB_NAME = "telegram_bot"
 
-ADMINS = [
-    6778132055,
-]
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN not set")
 
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMINS
+if not MONGO_URI:
+    raise ValueError("MONGO_URI not set")
