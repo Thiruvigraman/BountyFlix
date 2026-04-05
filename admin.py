@@ -4,8 +4,7 @@ from telegram import Update
 from telegram.ext import CallbackContext
 from database import get_all_user_ids, add_title
 
-ADMIN_ID = 123456789  # CHANGE THIS
-
+ADMIN_ID = 6778132055
 
 def admin(update: Update, context: CallbackContext):
     if update.effective_user.id != ADMIN_ID:
